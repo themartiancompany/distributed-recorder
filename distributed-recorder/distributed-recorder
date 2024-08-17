@@ -17,19 +17,21 @@ source \
 # are available
 _requirements() {
   _check_cmd \
-    'dynssh' \
-    'dynssh'
+    'remote-recorder' \
+    'remote-recorder'
   _check_cmd \
-    'rsync' \
-    'rsync'
+    'remote-encoder' \
+    'remote-encoder'
 }
 
 # shellcheck disable=SC2034
 _global_variables() {
   recording_date=""
-  target_host=""
+  recorder_host=""
+  encoder_host=""
   recording_resolution=""
   recorder_app=""
+  encoder_app=""
   recording_length=""
   recording_buffer=""
   out_file=""
@@ -38,22 +40,9 @@ _global_variables() {
   quiet=""
 }
 
-_dynssh_options(){
-  _dynssh_opts+=(
-    -t
-      "${_target_host}"
-  )
-  _rsync_opts+=(
-    # -az
-  )
-}
-
-_android-recorder_options(){
-  _tmp="${HOME}/storage/movies/$( \
-    basename \
-      "${_out}").remote.mp4"
+_remote-recorder_options(){
   _recorder+=(
-    android-recorder
+    "${_recorder_app}"
   )
   if [[ "${_buffer}" != "" ]]; then
     _recorder_opts+=(
@@ -62,19 +51,28 @@ _android-recorder_options(){
     )
   fi
   _recorder_opts+=(
-    -l
+    -L
       "${_length}" 
     -b
       "${_rate}"
+    -t
+      "${_recorder_host}"
+  )
+}
+
+_remote-encoder_options(){
+  _encoder+=(
+    "${_encoder_app}"
+  )
+  _encoder_opts+=(
+    -t
+      "${_encoder_host}" 
   )
 }
 
 _android-camera-recorder_options(){
-  _tmp="${HOME}/storage/movies/$( \
-    basename \
-      "${_out}").remote.mp4"
   _recorder+=(
-    android-camera-recorder
+    "${_recorder_app}"
   )
   _recorder_opts+=(
     -L
@@ -86,60 +84,52 @@ _android-camera-recorder_options(){
   )
 }
 
-# Remote record.
+# Distributed record.
 # $1: input video file
 # $2: recording method (root)
 # $2: delay seconds
 # $3: output video file
 _remote_recorder() {
   local \
-    _target_host="${1}" \
-    _recorder_app="${2}" \
-    _resolution="${3}" \
-    _rate="${4}" \
-    _length="${5}" \
-    _buffer="${6}" \
-    _out="${7}" \
+    _recorder_host="${1}" \
+    _encoder_host="${2}" \
+    _recorder_app="${3}" \
+    _encoder_app="${4}" \
+    _resolution="${5}" \
+    _rate="${6}" \
+    _length="${7}" \
+    _buffer="${8}" \
+    _out="${9}" \
     _recorder_opts=() \
-    _recorder=() \
-    _rsync_opts=() \
-    _dynssh_opts=() \
+    _encoder_opts=() \
+    _encoder=() \
     _tmp
+  _tmp="$( \
+    mktemp \
+      --suffix='.mp4')"
+  rm \
+    "${_tmp}"
   if [[ "${quiet}" != "y" ]]; then
     _recorder_opts+=(
       -v
     )
-    _dynssh_opts+=(
-      -v
-    )
-    _rsync_opts+=(
+    _encoder_opts+=(
       -v
     )
   fi
-  _dynssh_options
   "_${_recorder_app}_options"
-  _msg_info \
-    "running dynssh with '${_dynssh_opts[*]}'"
-  dynssh \
-    "${_dynssh_opts[@]}" -- \
-    "${_target_host}" \
-    "${_recorder[@]}" \
-      "${_recorder_opts[@]}" \
-      "${_tmp}"
-  dynssh \
-    "${_dynssh_opts[@]}" \
-    -C \
-      rsync -- \
-    "${_rsync_opts[@]}" \
-    "${_target_host}:${_tmp}" \
+  "_${_encoder_app}_options"
+  "${_recorder[@]}" \
+    "${_recorder_opts[@]}" \
+    "${_tmp}"
+  "${_encoder[@]}" \
+    "${_encoder_opts[@]}" \
+    "${_tmp}" \
     "${_out}"
-  dynssh \
-    "${_dynssh_opts[@]}" -- \
-    "${_target_host}" \
-    rm \
-      "${_tmp}"
+  rm \
+    "${_tmp}"
   _msg_info \
-    "recording ended, quitting."
+    "distributed recording ended, quitting."
 }
 
 _resolution_auto_detect() {
@@ -166,12 +156,20 @@ _resolution_auto_detect() {
 # from program command line option parameters
 _set_overrides() {
   _set_override \
-    "target" \
+    "recorder" \
     "host" \
     ""
-  if [[ "${target_host}" == "" ]]; then
+  if [[ "${recorder_host}" == "" ]]; then
     _msg_error \
-      "You must specify an host."
+      "You must specify a recorder host."
+  fi
+  _set_override \
+    "encoder" \
+    "host" \
+    ""
+  if [[ "${encoder_host}" == "" ]]; then
+    _msg_error \
+      "You must specify an encoder host."
   fi
   _set_override \
     "recording" \
@@ -180,7 +178,11 @@ _set_overrides() {
   _set_override \
     "recorder" \
     "app" \
-    "android-camerarecorder"
+    "remote-recorder"
+  _set_override \
+    "encoder" \
+    "app" \
+    "remote-encoder"
   _set_override \
     "recording" \
     "resolution" \
@@ -214,8 +216,10 @@ _set_overrides() {
 _show_config() {
   _msg_info "${app_name} configuration"
   _msg_info "           Recording date:   $(_get "recording" "date")"
-  _msg_info "              Target host:   $(_get "target" "host")"
+  _msg_info "            Recorder host:   $(_get "recorder" "host")"
+  _msg_info "             Encoder host:   $(_get "encoder" "host")"
   _msg_info "             Recorder app:   $(_get "recorder" "app")"
+  _msg_info "              Encoder app:   $(_get "encoder" "app")"
   _msg_info "                 Bit rate:   $(_get "bit" "rate")"
   _msg_info "     Recording resolution:   $(_get "recording" "resolution")"
   _msg_info "         Recording length:   $(_get "recording" "length")"
@@ -235,16 +239,20 @@ _usage() {
       _usage_text << \
         ENDUSAGETEXT || true
 
-Remote recorder.
+Distributed recorder.
 
 Usage:
   $(_get "app" "name")
     [options]
     (<out_file>)
   options:
-     -t <target_host>     Target host.
-                          Default: $(_get "recording" "resolution")
-     -r <recorder_app>    Recorder application to use.
+     -t <recorder_host>   Recorder host.
+                          Default: $(_get "recorder" "host")
+     -e <encoder_host>    Target host.
+                          Default: $(_get "encoder" "host")
+     -R <recorder_app>    Recorder application to use.
+                          Default: $(_get "recorder" "app")
+     -E <encoder_app>    Recorder application to use.
                           Default: $(_get "recorder" "app")
      -s <widthxheight>    Recording resolution.
                           Default: $(_get "recording" "resolution")
@@ -271,12 +279,14 @@ _requirements
 # shellcheck disable=SC2034
 while \
   getopts \
-    't:r:b:L:k:s:cvh?' \
+    't:e:R:E:b:L:k:s:cvh?' \
     arg; do
   case \
     "${arg}" in
-    t) override_target_host="${OPTARG}" ;;
-    r) override_recorder_app="${OPTARG}" ;;
+    t) override_recorder_host="${OPTARG}" ;;
+    e) override_encoder_host="${OPTARG}" ;;
+    R) override_recorder_app="${OPTARG}" ;;
+    E) override_encoder_app="${OPTARG}" ;;
     b) override_bit_rate="${OPTARG}" ;;
     L) override_recording_length="${OPTARG}" ;;
     k) override_recording_buffer="${OPTARG}" ;;
@@ -310,13 +320,15 @@ _config_user_init \
   "$(_get "app" "name")"
 _show_config
 app_opts=(
-  "${target_host}"
+  "${recorder_host}"
   "${recorder_app}"
+  "${encoder_host}"
+  "${encoder_app}"
   "${recording_resolution}"
   "${bit_rate}"
   "${recording_length}"
   "${recording_buffer}"
   "${out_file}"
 )
-_remote_recorder \
+_distributed_recorder \
   "${app_opts[@]}"
