@@ -89,7 +89,7 @@ _android-camera-recorder_options(){
 # $2: recording method (root)
 # $2: delay seconds
 # $3: output video file
-_remote_recorder() {
+_distributed_recorder() {
   local \
     _recorder_host="${1}" \
     _encoder_host="${2}" \
@@ -121,7 +121,8 @@ _remote_recorder() {
   "_${_encoder_app}_options"
   "${_recorder[@]}" \
     "${_recorder_opts[@]}" \
-    "${_tmp}"
+    "${_tmp}" || \
+    true
   "${_encoder[@]}" \
     "${_encoder_opts[@]}" \
     "${_tmp}" \
@@ -190,12 +191,11 @@ _set_overrides() {
   _set_override \
     "bit" \
     "rate" \
-    "420000" # 420 Kb?
-    # "16000000" # 16 Mb?
+    "160000" # 160 Kbps
   _set_override \
     "recording" \
     "length" \
-    "$(( 6 * 10 ))" # "$(( 24 * 60 * 60 ))" # 24 hours
+    "$(( 3 * 6 * 10 ))" # "$(( 24 * 60 * 60 ))" # 24 hours
   _set_override \
     "recording" \
     "buffer" \
@@ -321,8 +321,8 @@ _config_user_init \
 _show_config
 app_opts=(
   "${recorder_host}"
-  "${recorder_app}"
   "${encoder_host}"
+  "${recorder_app}"
   "${encoder_app}"
   "${recording_resolution}"
   "${bit_rate}"
